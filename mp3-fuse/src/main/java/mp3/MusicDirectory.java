@@ -43,6 +43,10 @@ public class MusicDirectory extends FSElement {
 
     private void processFile(Path path) {
         try {
+
+//            if (!path.endsWith(".mp3"))
+//                return;
+
             MusicFile file = new MusicFile();
             file.setOriginalPath(path.toString());
             file.setPath(computeNewPath(path));
