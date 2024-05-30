@@ -11,6 +11,7 @@ import ru.serce.jnrfuse.struct.FileStat;
 import ru.serce.jnrfuse.struct.FuseFileInfo;
 import mp3.*;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 
@@ -53,19 +54,6 @@ public class MusicFuse extends FuseStubFS {
         return directory;
     }
 
-    public void init() {
-        MusicDirectory originalDirectory = (MusicDirectory) root.getContent().get(0);
-        var fileList = originalDirectory.getAllFileContent();
-
-        var artistMap = new HashMap<String, MusicDirectory>();
-        var genreMap = new HashMap<String, MusicDirectory>();
-        var yearMap = new HashMap<String, MusicDirectory>();
-
-        populateMaps(fileList, artistMap, genreMap, yearMap);
-        createGroupedDirectories(artistMap, genreMap, yearMap);
-        addFilesToGroupedDirectories(fileList, artistMap, genreMap, yearMap);
-    }
-
     private void populateMaps(List<MusicFile> fileList,
                               HashMap<String, MusicDirectory> artistMap,
                               HashMap<String, MusicDirectory> genreMap,
@@ -75,6 +63,22 @@ public class MusicFuse extends FuseStubFS {
             genreMap.putIfAbsent(file.getGenre(), createDirectory("/grouped_mp3/genre/" + file.getGenre()));
             yearMap.putIfAbsent(file.getYear(), createDirectory("/grouped_mp3/year/" + file.getYear()));
         }
+    }
+
+    private void setDirectoryStat(FileStat stat, int permissions) {
+        stat.st_mode.set(FileStat.S_IFDIR | permissions);
+        stat.st_nlink.set(2);
+    }
+
+    private void setFileStat(FileStat stat, MusicFile file) {
+        stat.st_mode.set(FileStat.S_IFREG | 0666);
+        stat.st_size.set(file.getData().length);
+        stat.st_nlink.set(1);
+    }
+
+    private void setOwnership(FileStat stat) {
+        stat.st_uid.set(getContext().uid.get());
+        stat.st_gid.set(getContext().gid.get());
     }
 
     private void createGroupedDirectories(HashMap<String, MusicDirectory> artistMap,
@@ -120,6 +124,19 @@ public class MusicFuse extends FuseStubFS {
         return path.substring(path.lastIndexOf('/') + 1);
     }
 
+    public void init() {
+        MusicDirectory originalDirectory = (MusicDirectory) root.getContent().get(0);
+        var fileList = originalDirectory.getAllFileContent();
+
+        var artistMap = new HashMap<String, MusicDirectory>();
+        var genreMap = new HashMap<String, MusicDirectory>();
+        var yearMap = new HashMap<String, MusicDirectory>();
+
+        populateMaps(fileList, artistMap, genreMap, yearMap);
+        createGroupedDirectories(artistMap, genreMap, yearMap);
+        addFilesToGroupedDirectories(fileList, artistMap, genreMap, yearMap);
+    }
+
     @Override
     public int getattr(String path, FileStat stat) {
         System.out.println("getattr called for path: " + path);
@@ -146,22 +163,6 @@ public class MusicFuse extends FuseStubFS {
 
         setOwnership(stat);
         return 0;
-    }
-
-    private void setDirectoryStat(FileStat stat, int permissions) {
-        stat.st_mode.set(FileStat.S_IFDIR | permissions);
-        stat.st_nlink.set(2);
-    }
-
-    private void setFileStat(FileStat stat, MusicFile file) {
-        stat.st_mode.set(FileStat.S_IFREG | 0666);
-        stat.st_size.set(file.getData().length);
-        stat.st_nlink.set(1);
-    }
-
-    private void setOwnership(FileStat stat) {
-        stat.st_uid.set(getContext().uid.get());
-        stat.st_gid.set(getContext().gid.get());
     }
 
     @Override
@@ -214,6 +215,29 @@ public class MusicFuse extends FuseStubFS {
         }
 
         fillDirectory(buf, filler, (MusicDirectory) element);
+        return 0;
+    }
+
+    @Override
+    public int readlink(String path, Pointer buf, long bufsize) {
+        System.out.println("readlink called for path: " + path);
+
+        FSElement element = root.find(path);
+        if (!(element instanceof MusicFile file)) {
+            System.out.println("readlink: No such file: " + path);
+            return -ErrorCodes.ENOENT();
+        }
+
+        String originalPath = file.getOriginalPath();
+        byte[] bytes = originalPath.getBytes(StandardCharsets.UTF_8);
+
+        if (bytes.length >= bufsize) {
+            return -ErrorCodes.ENAMETOOLONG();
+        }
+
+        buf.put(0, bytes, 0, bytes.length);
+        buf.putByte(bytes.length, (byte) 0);
+
         return 0;
     }
 
